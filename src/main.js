@@ -83,6 +83,7 @@ class App {
       const occupied = table.seats.filter(s => s.guestId).length;
 
       btn.className = `nav-table-pill ${isNovios ? 'novios' : ''}`;
+      btn.setAttribute('data-table-id', table.id);
       if (this.scene && this.scene.activeFocusedTableId === table.id) {
         btn.classList.add('active');
       }
@@ -97,6 +98,17 @@ class App {
       });
 
       navBar.appendChild(btn);
+    });
+  }
+
+  syncTableNavigatorActive(tableId) {
+    document.querySelectorAll('.nav-table-pill').forEach(btn => {
+      if (btn.getAttribute('data-table-id') === tableId) {
+        btn.classList.add('active');
+        btn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      } else {
+        btn.classList.remove('active');
+      }
     });
   }
 
@@ -155,6 +167,74 @@ class App {
     const btnZoomOut = document.getElementById('btn-zoom-out');
     if (btnZoomIn) btnZoomIn.addEventListener('click', () => this.scene.zoomIn());
     if (btnZoomOut) btnZoomOut.addEventListener('click', () => this.scene.zoomOut());
+
+    // Lateral Pan, Continuous Glide, Table Stepping & Touch Mode
+    const btnPanLeft = document.getElementById('btn-pan-left');
+    const btnPanRight = document.getElementById('btn-pan-right');
+    const btnPrevTable = document.getElementById('btn-prev-table');
+    const btnNextTable = document.getElementById('btn-next-table');
+    const btnTouchMode = document.getElementById('btn-touch-mode');
+
+    if (btnPanLeft) {
+      btnPanLeft.addEventListener('click', () => {
+        this.scene.moveLateral(-1);
+      });
+      btnPanLeft.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.scene.startContinuousLateral(-1);
+      });
+      const stopLeft = () => this.scene.stopContinuousMovement();
+      btnPanLeft.addEventListener('pointerup', stopLeft);
+      btnPanLeft.addEventListener('pointerleave', stopLeft);
+      btnPanLeft.addEventListener('pointercancel', stopLeft);
+    }
+
+    if (btnPanRight) {
+      btnPanRight.addEventListener('click', () => {
+        this.scene.moveLateral(1);
+      });
+      btnPanRight.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.scene.startContinuousLateral(1);
+      });
+      const stopRight = () => this.scene.stopContinuousMovement();
+      btnPanRight.addEventListener('pointerup', stopRight);
+      btnPanRight.addEventListener('pointerleave', stopRight);
+      btnPanRight.addEventListener('pointercancel', stopRight);
+    }
+
+    if (btnPrevTable) {
+      btnPrevTable.addEventListener('click', () => {
+        const tableId = this.scene.stepTable(-1);
+        if (tableId) this.syncTableNavigatorActive(tableId);
+      });
+    }
+
+    if (btnNextTable) {
+      btnNextTable.addEventListener('click', () => {
+        const tableId = this.scene.stepTable(1);
+        if (tableId) this.syncTableNavigatorActive(tableId);
+      });
+    }
+
+    if (btnTouchMode) {
+      btnTouchMode.addEventListener('click', () => {
+        const nextMode = this.scene.toggleTouchMode();
+        const icon = document.getElementById('touch-mode-icon');
+        const text = document.getElementById('touch-mode-text');
+        if (nextMode === 'pan') {
+          if (icon) icon.textContent = '🖐️';
+          if (text) text.textContent = 'Mover';
+          btnTouchMode.classList.remove('active-rotate');
+          this.showToast('🖐️ Modo de toque: Desplazar en lateral');
+        } else {
+          if (icon) icon.textContent = '🔄';
+          if (text) text.textContent = 'Girar';
+          btnTouchMode.classList.add('active-rotate');
+          this.showToast('🔄 Modo de toque: Girar perspectiva 3D');
+        }
+      });
+    }
 
     // Mobile Drawer Open / Close
     const sidebar = document.getElementById('sidebar');

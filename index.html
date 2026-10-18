@@ -87,7 +87,7 @@
           🎥 Panorámica
         </button>
         <button class="cam-btn" id="cam-topdown" data-preset="topdown">
-          📐 Plano Aéreo
+          📐 Plano
         </button>
         <button class="cam-btn" id="cam-novios" data-preset="novios">
           💒 Novios
@@ -97,10 +97,31 @@
         </button>
       </div>
 
-      <!-- Mobile Drawer Open Button -->
-      <button class="mobile-drawer-toggle" id="btn-mobile-drawer" title="Abrir lista de invitados y asignaciones">
-        <span>📋</span> Invitados (<span id="mobile-badge-unassigned">0</span>)
-      </button>
+      <!-- Mobile & Desktop Lateral Pan and Navigation Dock -->
+      <div class="mobile-lateral-dock" id="mobile-lateral-dock">
+        <div class="lateral-nav-group">
+          <button class="dock-btn dock-step" id="btn-prev-table" title="Ir a la mesa anterior">
+            <span>⏮</span>
+          </button>
+          <button class="dock-btn dock-pan" id="btn-pan-left" title="Deslizar hacia la izquierda (mantener presionado para movimiento continuo)">
+            <span>◀</span> <span class="dock-label">Izq</span>
+          </button>
+          <button class="dock-btn dock-mode" id="btn-touch-mode" title="Cambiar modo de toque (Desplazar o Girar)">
+            <span id="touch-mode-icon">🖐️</span> <span id="touch-mode-text" class="dock-label">Mover</span>
+          </button>
+          <button class="dock-btn dock-pan" id="btn-pan-right" title="Deslizar hacia la derecha (mantener presionado para movimiento continuo)">
+            <span class="dock-label">Der</span> <span>▶</span>
+          </button>
+          <button class="dock-btn dock-step" id="btn-next-table" title="Ir a la mesa siguiente">
+            <span>⏭</span>
+          </button>
+        </div>
+
+        <!-- Mobile Drawer Open Button inside dock -->
+        <button class="mobile-drawer-toggle" id="btn-mobile-drawer" title="Abrir lista de invitados y asignaciones">
+          <span>📋</span> <span class="mobile-drawer-label">Invitados</span> (<span id="mobile-badge-unassigned">0</span>)
+        </button>
+      </div>
     </main>
 
     <!-- Sidebar / Drawer -->

@@ -48,14 +48,22 @@ export class WeddingScene {
     this.labelOverlay.className = 'label-overlay-layer';
     this.container.appendChild(this.labelOverlay);
 
-    // OrbitControls
+    // OrbitControls with optimized touch panning for mobile
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.06;
-    this.controls.maxPolarAngle = Math.PI / 2 - 0.03; // don't go below floor
-    this.controls.minDistance = 4;
-    this.controls.maxDistance = 60;
+    this.controls.dampingFactor = 0.08;
+    this.controls.screenSpacePanning = true; // Crucial for lateral panning on phones!
+    this.controls.panSpeed = 2.0; // Responsive touch pan speed for mobile
+    this.controls.maxPolarAngle = Math.PI / 2 - 0.03;
+    this.controls.minDistance = 3.5;
+    this.controls.maxDistance = 65;
     this.controls.target.set(0, 1.2, 0);
+
+    // 1 finger = PAN (lateral and forward movement across the room), 2 fingers = ROTATE & ZOOM
+    this.controls.touches = {
+      ONE: THREE.TOUCH.PAN,
+      TWO: THREE.TOUCH.DOLLY_ROTATE
+    };
 
     // Raycaster for 3D clicks
     this.raycaster = new THREE.Raycaster();
@@ -919,35 +927,201 @@ export class WeddingScene {
     this.controls.update();
   }
 
+  /**
+   * Lateral camera movement (left / right sliding)
+   * @param {number} direction - -1 for left, 1 for right
+   * @param {number} step - distance in units
+   */
+  moveLateral(direction, step = 5.2) {
+    this.stopContinuousMovement();
+    const right = new THREE.Vector3();
+    this.camera.getWorldDirection(right);
+    right.cross(this.camera.up).normalize();
+
+    const offset = right.multiplyScalar(step * direction);
+    const newPos = this.camera.position.clone().add(offset);
+    const newTarget = this.controls.target.clone().add(offset);
+
+    // Limit within ballroom space
+    newPos.x = Math.max(-26, Math.min(26, newPos.x));
+    newPos.z = Math.max(-22, Math.min(30, newPos.z));
+    newTarget.x = Math.max(-22, Math.min(22, newTarget.x));
+    newTarget.z = Math.max(-20, Math.min(22, newTarget.z));
+
+    this.smoothMoveCamera(newPos, newTarget);
+  }
+
+  /**
+   * Continuous smooth lateral glide while holding button
+   */
+  startContinuousLateral(direction) {
+    this.stopContinuousMovement();
+    const speed = 14 * direction; // units per second
+    let lastTime = performance.now();
+
+    const loop = (now) => {
+      const dt = Math.min(0.08, (now - lastTime) / 1000);
+      lastTime = now;
+
+      const right = new THREE.Vector3();
+      this.camera.getWorldDirection(right);
+      right.cross(this.camera.up).normalize();
+
+      const offset = right.multiplyScalar(speed * dt);
+      this.camera.position.add(offset);
+      this.controls.target.add(offset);
+
+      // Clamp within room
+      this.camera.position.x = Math.max(-26, Math.min(26, this.camera.position.x));
+      this.camera.position.z = Math.max(-22, Math.min(30, this.camera.position.z));
+      this.controls.target.x = Math.max(-22, Math.min(22, this.controls.target.x));
+      this.controls.target.z = Math.max(-20, Math.min(22, this.controls.target.z));
+
+      this.controls.update();
+      this.continuousAnimId = requestAnimationFrame(loop);
+    };
+    this.continuousAnimId = requestAnimationFrame(loop);
+  }
+
+  stopContinuousMovement() {
+    if (this.continuousAnimId) {
+      cancelAnimationFrame(this.continuousAnimId);
+      this.continuousAnimId = null;
+    }
+  }
+
+  /**
+   * Jump to next or previous table in sequential order
+   * @param {number} direction - -1 for previous table, 1 for next table
+   */
+  stepTable(direction) {
+    if (!this.tables || this.tables.length === 0) return null;
+    const tableIds = this.tables.map(t => t.id);
+    let currentIndex = -1;
+    if (this.activeFocusedTableId) {
+      currentIndex = tableIds.indexOf(this.activeFocusedTableId);
+    }
+    let nextIndex = (currentIndex + direction + tableIds.length) % tableIds.length;
+    const nextTableId = tableIds[nextIndex];
+    this.focusTable(nextTableId);
+    return nextTableId;
+  }
+
+  /**
+   * Forward / Backward camera movement
+   */
+  moveForward(direction) {
+    this.stopContinuousMovement();
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+
+    const distance = 4.8 * direction;
+    const offset = forward.multiplyScalar(distance);
+
+    const newPos = this.camera.position.clone().add(offset);
+    const newTarget = this.controls.target.clone().add(offset);
+
+    newPos.z = Math.max(-20, Math.min(24, newPos.z));
+    newTarget.z = Math.max(-18, Math.min(18, newTarget.z));
+
+    this.smoothMoveCamera(newPos, newTarget);
+  }
+
+  /**
+   * Toggle 1-finger touch mode between Pan (Desplazar) and Rotate (Girar)
+   */
+  setTouchMode(mode) {
+    if (mode === 'rotate') {
+      this.controls.touches.ONE = THREE.TOUCH.ROTATE;
+      this.controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
+    } else {
+      this.controls.touches.ONE = THREE.TOUCH.PAN;
+      this.controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+    }
+  }
+
+  getTouchMode() {
+    return this.controls.touches.ONE === THREE.TOUCH.PAN ? 'pan' : 'rotate';
+  }
+
+  toggleTouchMode() {
+    const current = this.getTouchMode();
+    const next = current === 'pan' ? 'rotate' : 'pan';
+    this.setTouchMode(next);
+    return next;
+  }
+
   smoothMoveCamera(endPos, endTarget) {
+    if (this.cameraAnimId) {
+      cancelAnimationFrame(this.cameraAnimId);
+    }
     const startPos = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
     let progress = 0;
 
     const lerp = () => {
-      progress += 0.04;
+      progress += 0.045;
       if (progress >= 1) {
         this.camera.position.copy(endPos);
         this.controls.target.copy(endTarget);
+        this.controls.update();
+        this.cameraAnimId = null;
         return;
       }
       // Ease in-out
       const ease = 0.5 - Math.cos(progress * Math.PI) / 2;
       this.camera.position.lerpVectors(startPos, endPos, ease);
       this.controls.target.lerpVectors(startTarget, endTarget, ease);
-      requestAnimationFrame(lerp);
+      this.controls.update();
+      this.cameraAnimId = requestAnimationFrame(lerp);
     };
-    lerp();
+    this.cameraAnimId = requestAnimationFrame(lerp);
   }
 
   initListeners() {
     window.addEventListener('resize', () => this.onWindowResize());
 
-    // Canvas click raycaster
-    this.renderer.domElement.addEventListener('click', (e) => this.onCanvasClick(e));
+    // Track pointer movement to differentiate true taps from pan/drags
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+    this.isDragging = false;
+
+    this.renderer.domElement.addEventListener('pointerdown', (e) => {
+      startX = e.clientX;
+      startY = e.clientY;
+      startTime = performance.now();
+      this.isDragging = false;
+    });
+
+    this.renderer.domElement.addEventListener('pointermove', (e) => {
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) > 8) {
+        this.isDragging = true;
+      }
+    });
+
+    this.renderer.domElement.addEventListener('pointerup', (e) => {
+      const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+      const elapsed = performance.now() - startTime;
+      if (dist > 8 || elapsed > 650) {
+        this.isDragging = true;
+      }
+    });
+
+    // Canvas click raycaster (fires only on deliberate short tap, never after drag/pan)
+    this.renderer.domElement.addEventListener('click', (e) => {
+      if (this.isDragging) {
+        this.isDragging = false;
+        return;
+      }
+      this.onCanvasClick(e);
+    });
   }
 
   onCanvasClick(e) {
+    if (this.isDragging) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
