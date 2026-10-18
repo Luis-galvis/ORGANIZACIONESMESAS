@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Boda Fernando & Luisa • Gestor y Visualizador 3D de Mesas</title>
+  <meta name="description" content="Visualizador 3D interactivo y gestor de asignación de mesas para la boda de Fernando & Luisa. Asigna invitados confirmados y exporta el reporte oficial en Excel (.xlsx).">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💍</text></svg>">
+  <script type="module" crossorigin src="/assets/index-CxAVpKh7.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DITd44bG.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Top Header Bar -->
+    <header class="top-header" role="banner">
+      <div class="header-brand">
+        <div class="brand-monogram">F&L</div>
+        <div class="brand-text">
+          <h1>FERNANDO & LUISA</h1>
+          <p>Recepción Nupcial • Visualizador 3D de Mesas</p>
+        </div>
+      </div>
+
+      <!-- Live Counters -->
+      <div class="header-stats" id="header-stats">
+        <div class="stat-pill" title="Total de invitados confirmados en el CSV">
+          <span class="stat-label">Confirmados:</span>
+          <span class="stat-value" id="stat-confirmed">81</span>
+        </div>
+        <div class="stat-pill success" title="Invitados con asiento asignado">
+          <span class="stat-label">Asignados:</span>
+          <span class="stat-value" id="stat-assigned">0</span>
+        </div>
+        <div class="stat-pill warning" title="Invitados pendientes por ubicar en mesa">
+          <span class="stat-label">Pendientes:</span>
+          <span class="stat-value" id="stat-pending">81</span>
+        </div>
+        <div class="stat-pill" title="Mesas habilitadas en el salón">
+          <span class="stat-label">Mesas:</span>
+          <span class="stat-value" id="stat-tables">11</span>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="header-actions">
+        <button class="btn btn-magic" id="btn-auto-assign" title="Distribuir automáticamente parejas y familias juntas">
+          <span>✨</span> Auto-Asignar
+        </button>
+
+        <button class="btn btn-gold" id="btn-export-excel" title="Descargar reporte en Excel (.xlsx) con asignación de mesas">
+          <span>📥</span> Descargar Excel (.xlsx)
+        </button>
+
+        <button class="btn btn-secondary" id="btn-toggle-labels" title="Mostrar u ocultar los nombres flotantes 3D sobre los invitados">
+          <span>🏷️</span> <span id="label-toggle-text">Nombres 3D</span>
+        </button>
+
+        <button class="btn btn-secondary btn-icon" id="btn-add-table" title="Agregar una nueva mesa al salón">
+          ➕
+        </button>
+
+        <button class="btn btn-secondary" id="btn-share-link" title="Compartir enlace con la distribución actual (WhatsApp / Celular)">
+          <span>🔗</span> <span>Compartir</span>
+        </button>
+
+        <button class="btn btn-secondary btn-icon" id="btn-import-csv" title="Cargar o actualizar archivo CSV de invitados">
+          📁
+        </button>
+      </div>
+    </header>
+
+    <!-- Main 3D Canvas Area -->
+    <main id="canvas-container" role="main">
+      <!-- Horizontal Table Quick Navigator Bar -->
+      <nav class="table-navigator-bar" id="table-navigator-bar" aria-label="Navegación rápida de mesas">
+        <!-- Rendered dynamically: Novios, Mesa 1, Mesa 2, ..., Mesa 8 -->
+      </nav>
+
+      <!-- Touch Zoom Buttons (Mobile / Tablet friendly) -->
+      <div class="touch-zoom-controls">
+        <button class="touch-zoom-btn" id="btn-zoom-in" title="Acercar cámara">+</button>
+        <button class="touch-zoom-btn" id="btn-zoom-out" title="Alejar cámara">−</button>
+      </div>
+
+      <!-- 3D Camera Floating Quick Buttons -->
+      <div class="camera-controls-bar">
+        <button class="cam-btn active" id="cam-general" data-preset="general">
+          🎥 Panorámica
+        </button>
+        <button class="cam-btn" id="cam-topdown" data-preset="topdown">
+          📐 Plano Aéreo
+        </button>
+        <button class="cam-btn" id="cam-novios" data-preset="novios">
+          💒 Novios
+        </button>
+        <button class="cam-btn" id="cam-walk" data-preset="walk">
+          🚶 Salón
+        </button>
+      </div>
+
+      <!-- Mobile Drawer Open Button -->
+      <button class="mobile-drawer-toggle" id="btn-mobile-drawer" title="Abrir lista de invitados y asignaciones">
+        <span>📋</span> Invitados (<span id="mobile-badge-unassigned">0</span>)
+      </button>
+    </main>
+
+    <!-- Sidebar / Drawer -->
+    <aside class="sidebar" id="sidebar" role="complementary">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">
+          <span>📋</span> Gestión de Invitados
+        </h2>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button class="btn btn-secondary btn-icon" id="btn-clear-all" title="Vaciar asignaciones de todas las mesas" style="width:30px; height:30px; font-size:12px;">
+            🧹
+          </button>
+          <button class="btn btn-secondary btn-icon" id="btn-backup" title="Copia de seguridad y respaldo" style="width:30px; height:30px; font-size:12px;">
+            💾
+          </button>
+          <button class="btn-close" id="btn-close-sidebar-mobile" title="Cerrar panel" style="display:none; font-size:22px; margin-left:6px; cursor:pointer;">
+            &times;
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabs Navigation -->
+      <nav class="sidebar-tabs" role="tablist">
+        <button class="tab-btn active" id="tab-unassigned" role="tab" aria-selected="true">
+          Pendientes (<span id="tab-count-unassigned">81</span>)
+        </button>
+        <button class="tab-btn" id="tab-tables" role="tab" aria-selected="false">
+          Mesas (<span id="tab-count-tables">11</span>)
+        </button>
+      </nav>
+
+      <!-- Search & Filters -->
+      <div class="search-filter-box">
+        <div class="search-input-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="guest-search" class="search-input" placeholder="Buscar por nombre, familia, teléfono...">
+        </div>
+        <div class="filter-pills" id="filter-pills">
+          <button class="filter-pill active" data-filter="all">Todos (<span id="badge-all">81</span>)</button>
+          <button class="filter-pill" data-filter="pareja">Parejas (2 pases)</button>
+          <button class="filter-pill" data-filter="familia">Familias (3+ pases)</button>
+          <button class="filter-pill" data-filter="individual">Individuales (1 pase)</button>
+        </div>
+      </div>
+
+      <!-- Tab Content Area -->
+      <div class="sidebar-content" id="sidebar-content">
+        <!-- Rendered dynamically by JavaScript -->
+      </div>
+    </aside>
+
+    <!-- Seat Assignment Modal -->
+    <div class="modal-overlay" id="seat-modal">
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="seat-modal-title">
+        <div class="modal-header">
+          <h3 id="seat-modal-title">Asignar Asiento</h3>
+          <button class="btn-close" id="btn-close-seat-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="seat-modal-info" style="color:var(--color-text-muted); font-size:13px;"></p>
+          
+          <div id="seat-current-occupant" style="display:none; padding:12px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius-md);">
+            <div style="font-size:11px; color:#f87171; text-transform:uppercase; font-weight:700;">Ocupante actual:</div>
+            <div id="seat-occupant-name" style="font-size:14px; font-weight:700; color:#fff;"></div>
+            <button class="btn btn-secondary" id="btn-vacate-seat" style="margin-top:8px; width:100%; font-size:12px; color:#f87171;">
+              ❌ Liberar Asiento
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label for="select-guest-to-seat">Seleccionar Invitado Confirmado:</label>
+            <select id="select-guest-to-seat" class="form-select">
+              <option value="">-- Escoger de la lista de pendientes --</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="btn-cancel-seat">Cancelar</button>
+          <button class="btn btn-gold" id="btn-confirm-seat">Asignar al Asiento</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add / Edit Table Modal -->
+    <div class="modal-overlay" id="table-modal">
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="table-modal-title">
+        <div class="modal-header">
+          <h3 id="table-modal-title">Configurar Mesa</h3>
+          <button class="btn-close" id="btn-close-table-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="input-table-name">Nombre o Identificador de Mesa:</label>
+            <input type="text" id="input-table-name" class="form-input" placeholder="Ej: Mesa 12 • Amigos">
+          </div>
+          <div class="form-group">
+            <label for="input-table-capacity">Capacidad de Asientos:</label>
+            <select id="input-table-capacity" class="form-select">
+              <option value="10" selected>10 personas (Estándar Recomendado)</option>
+              <option value="11">11 personas</option>
+              <option value="12">12 personas</option>
+              <option value="13">13 personas</option>
+              <option value="14">14 personas</option>
+              <option value="15">15 personas (Máximo)</option>
+              <option value="8">8 personas</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="btn-cancel-table">Cancelar</button>
+          <button class="btn btn-gold" id="btn-save-table">Guardar Mesa</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Assign to Table Modal (replaces browser prompt) -->
+    <div class="modal-overlay" id="quick-assign-modal">
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="quick-assign-title">
+        <div class="modal-header">
+          <h3 id="quick-assign-title">Asignar Invitado a Mesa</h3>
+          <button class="btn-close" id="btn-close-quick-assign-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="quick-assign-guest-banner" style="padding:10px 14px; background:rgba(212,175,55,0.12); border:1px solid var(--color-gold); border-radius:var(--radius-md); display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:11px; color:var(--color-gold-light); text-transform:uppercase; font-weight:700;">Invitado a ubicar:</div>
+              <div id="quick-assign-guest-name" style="font-size:15px; font-weight:700; color:#fff;"></div>
+            </div>
+            <div id="quick-assign-guest-meta" style="font-size:12px; color:var(--color-text-muted);"></div>
+          </div>
+
+          <p style="font-size:13px; color:var(--color-text-muted); margin-top:4px;">
+            Haz clic directamente en la mesa donde deseas ubicarlo:
+          </p>
+
+          <div id="quick-assign-tables-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:6px;">
+            <!-- Rendered dynamically with buttons for Mesa 1, Mesa 2, etc. -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="btn-cancel-quick-assign">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CSV Import Modal -->
+    <div class="modal-overlay" id="csv-modal">
+      <div class="modal-box" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3>Importar Archivo CSV de Invitados</h3>
+          <button class="btn-close" id="btn-close-csv-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px; color:var(--color-text-muted);">
+            El archivo CSV original de la boda ya viene precargado. Si tienes una versión actualizada de 
+            <code>lista_invitados_boda_fernando_y_luisa.csv</code>, puedes seleccionarlo a continuación:
+          </p>
+          <input type="file" id="input-csv-file" accept=".csv" class="form-input" style="padding:8px;">
+          <button class="btn btn-secondary" id="btn-reload-default-csv" style="margin-top:6px;">
+            🔄 Restaurar CSV original de Fernando & Luisa
+          </button>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="btn-cancel-csv">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Backup JSON Modal -->
+    <div class="modal-overlay" id="backup-modal">
+      <div class="modal-box" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3>Copia de Seguridad y Respaldo</h3>
+          <button class="btn-close" id="btn-close-backup-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px; color:var(--color-text-muted);">
+            Tus asignaciones se guardan automáticamente en tu navegador. Puedes copiar tu distribución en JSON o restaurar una copia previa:
+          </p>
+          <textarea id="backup-json-area" class="form-input" rows="8" style="font-family:monospace; font-size:11px;"></textarea>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary" id="btn-copy-backup-json" style="flex:1;">
+              📋 Copiar JSON
+            </button>
+            <button class="btn btn-gold" id="btn-load-backup-json" style="flex:1;">
+              📥 Cargar desde JSON
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="btn-close-backup">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+      <span id="toast-icon">✨</span>
+      <span id="toast-message">Mensaje</span>
+    </div>
+  </div>
+
+</body>
+</html>

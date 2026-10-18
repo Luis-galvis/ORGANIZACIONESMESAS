@@ -1,0 +1,19 @@
+{
+  "name": "boda-fernando-luisa-mesas-3d",
+  "version": "1.0.0",
+  "description": "Visualizador 3D interactivo y gestor de asignación de mesas para la boda de Fernando & Luisa con exportación a Excel",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host --port 3000",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "canvas-confetti": "^1.9.4",
+    "three": "^0.174.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "vite": "^6.2.1"
+  }
+}
