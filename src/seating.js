@@ -75,9 +75,20 @@ export class SeatingManager {
   }
 
   async loadFromCloud() {
-    const cloudTables = await loadSeatingState();
-    if (cloudTables && cloudTables.length > 0) {
-      this.tables = cloudTables;
+    const res = await loadSeatingState();
+    if (res) {
+      const tables = Array.isArray(res) ? res : res.tables;
+      if (tables && tables.length > 0) {
+        this.tables = tables;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  updateTablesFromRealtime(newTables) {
+    if (Array.isArray(newTables) && newTables.length > 0) {
+      this.tables = newTables;
       return true;
     }
     return false;

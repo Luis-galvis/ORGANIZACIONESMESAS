@@ -1,9 +1,32 @@
-// cloud.js - Multi-tier Cloud Persistence & Mobile Link Sharing for Fernando & Luisa Mesas
+// cloud.js - Supabase Realtime Cloud Persistence & Mobile Link Sharing for Fernando & Luisa Mesas
+import { createClient } from '@supabase/supabase-js';
+
+export const SUPABASE_URL = 'https://tapusiqdotxhtnyxavta.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_6YvmpwE3e3aF8D1FoFRMrQ_Zr4y28m5';
+export const BODA_RECORD_ID = 'boda_fernando_luisa';
 
 const STORAGE_KEY = 'boda_fernando_luisa_mesas_v3';
 
+// Initialize Supabase Client
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: false },
+  realtime: { params: { eventsPerSecond: 10 } }
+});
+
+// Event listener for cloud status changes
+let onStatusChangeCallback = null;
+export function setCloudStatusListener(cb) {
+  onStatusChangeCallback = cb;
+}
+
+function notifyStatus(status, details = '') {
+  if (typeof onStatusChangeCallback === 'function') {
+    onStatusChangeCallback(status, details);
+  }
+}
+
 /**
- * Saves seating layout to local storage, Cloud API, and creates a shareable link
+ * Saves seating layout to LocalStorage and Supabase Database
  */
 export async function saveSeatingState(tables) {
   const payload = {
@@ -11,39 +34,54 @@ export async function saveSeatingState(tables) {
     updatedAt: new Date().toISOString()
   };
 
-  // 1. Local Persistence (100% offline & instant)
+  // 1. Local Persistence (instant backup)
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch (e) {
     console.warn('LocalStorage save error:', e);
   }
 
-  // 2. Cloud API Endpoint (for Vercel / serverless / Node backend)
+  // 2. Supabase Cloud DB Persistence (Synchronizes across all devices/users)
   let cloudSaved = false;
+  let cloudError = null;
+
   try {
-    const res = await fetch('/api/seating', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
+    notifyStatus('saving', 'Guardando en la nube...');
+    const { error } = await supabase
+      .from('boda_mesas')
+      .upsert({
+        id: BODA_RECORD_ID,
+        tables: tables,
+        updated_at: payload.updatedAt
+      }, { onConflict: 'id' });
+
+    if (!error) {
       cloudSaved = true;
+      notifyStatus('synced', 'Sincronizado con Supabase');
+    } else {
+      cloudError = error;
+      console.warn('Supabase save error (check if table "boda_mesas" exists):', error.message);
+      notifyStatus('offline', error.message.includes('not find the table') 
+        ? 'Falta crear tabla boda_mesas' 
+        : 'Error guardando en nube');
     }
   } catch (e) {
-    // Backend API might not be running in pure static mode, which is fine
+    cloudError = e;
+    console.warn('Supabase network error:', e);
+    notifyStatus('offline', 'Modo local (sin conexión a BD)');
   }
 
-  return { cloudSaved, timestamp: payload.updatedAt };
+  return { cloudSaved, error: cloudError, timestamp: payload.updatedAt };
 }
 
 /**
  * Loads seating layout checking:
- * 1. URL Hash (shared link via WhatsApp/Mobile)
- * 2. Cloud API endpoint (/api/seating)
- * 3. LocalStorage
+ * 1. URL Hash (shared link via WhatsApp/Mobile override)
+ * 2. Supabase Cloud DB (Global sync for all guests)
+ * 3. LocalStorage (Offline fallback)
  */
 export async function loadSeatingState() {
-  // Check URL Hash first (if someone opened a shared link)
+  // 1. Check URL Hash first (if someone opened a shared link)
   try {
     const hash = window.location.hash;
     if (hash && hash.startsWith('#layout=')) {
@@ -52,34 +90,52 @@ export async function loadSeatingState() {
       const parsed = JSON.parse(jsonStr);
       if (Array.isArray(parsed.tables)) {
         console.log('Loaded seating from shared URL link');
-        return parsed.tables;
+        notifyStatus('synced', 'Cargado desde enlace compartido');
+        return { tables: parsed.tables, source: 'url' };
       }
     }
   } catch (e) {
     console.warn('Could not parse layout from URL hash:', e);
   }
 
-  // Check Cloud API endpoint
+  // 2. Load from Supabase Cloud DB
   try {
-    const res = await fetch('/api/seating');
-    if (res.ok) {
-      const data = await res.json();
-      if (data && Array.isArray(data.tables) && data.tables.length > 0) {
-        console.log('Loaded seating from Cloud API');
-        return data.tables;
+    notifyStatus('connecting', 'Conectando a Supabase...');
+    const { data, error } = await supabase
+      .from('boda_mesas')
+      .select('id, tables, updated_at')
+      .eq('id', BODA_RECORD_ID)
+      .maybeSingle();
+
+    if (!error && data && Array.isArray(data.tables) && data.tables.length > 0) {
+      console.log('✅ Distribución cargada exitosamente desde Supabase DB');
+      notifyStatus('synced', 'Conectado a la nube (Supabase)');
+      // Cache in LocalStorage
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ tables: data.tables, updatedAt: data.updated_at }));
+      } catch (err) { /* ignore */ }
+      return { tables: data.tables, source: 'supabase', updatedAt: data.updated_at };
+    } else if (error) {
+      console.warn('Supabase load note:', error.message);
+      if (error.message.includes('not find the table')) {
+        notifyStatus('needs_table', 'Crea la tabla en Supabase');
+      } else {
+        notifyStatus('offline', 'Error cargando BD');
       }
     }
   } catch (e) {
-    // API not available, proceed to local storage
+    console.warn('Supabase connection error:', e);
+    notifyStatus('offline', 'Sin conexión');
   }
 
-  // Fallback to LocalStorage
+  // 3. Fallback to LocalStorage
   try {
     const local = localStorage.getItem(STORAGE_KEY);
     if (local) {
       const parsed = JSON.parse(local);
       if (Array.isArray(parsed.tables) && parsed.tables.length > 0) {
-        return parsed.tables;
+        notifyStatus('local', 'Cargado de caché local');
+        return { tables: parsed.tables, source: 'local' };
       }
     }
   } catch (e) {
@@ -90,12 +146,50 @@ export async function loadSeatingState() {
 }
 
 /**
+ * Subscribes to Realtime updates on the boda_mesas table
+ * so all viewers get instantaneous updates when anyone assigns or modifies a table!
+ */
+export function subscribeToCloudChanges(onUpdate) {
+  try {
+    const channel = supabase
+      .channel('boda-mesas-realtime-channel')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'boda_mesas',
+          filter: `id=eq.${BODA_RECORD_ID}`
+        },
+        (payload) => {
+          if (payload.new && Array.isArray(payload.new.tables)) {
+            console.log('⚡ Cambio en tiempo real detectado en Supabase!');
+            notifyStatus('synced', 'Actualizado en tiempo real');
+            if (typeof onUpdate === 'function') {
+              onUpdate(payload.new.tables, payload.new.updated_at);
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('📡 Supabase Realtime conectado');
+        }
+      });
+
+    return channel;
+  } catch (e) {
+    console.warn('Could not initialize Supabase Realtime channel:', e);
+    return null;
+  }
+}
+
+/**
  * Generates an instant shareable link containing the compressed state
  * Perfect for sending via WhatsApp or opening on phone!
  */
 export function generateShareableLink(tables) {
   try {
-    // Keep minimal payload for URL length
     const minimalTables = tables.map(t => ({
       id: t.id,
       name: t.name,

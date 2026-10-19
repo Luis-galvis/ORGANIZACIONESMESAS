@@ -4,7 +4,12 @@ import { RAW_CSV_DATA, parseCSV, expandGuests } from './data.js';
 import { SeatingManager } from './seating.js';
 import { WeddingScene } from './scene.js';
 import { exportToExcel } from './export.js';
-import { generateShareableLink } from './cloud.js';
+import { 
+  generateShareableLink, 
+  supabase, 
+  setCloudStatusListener, 
+  subscribeToCloudChanges 
+} from './cloud.js';
 
 class App {
   constructor() {
@@ -35,8 +40,18 @@ class App {
     // 2. Initialize Seating Manager
     this.seatingManager = new SeatingManager(this.guests);
 
+    // 2.1 Set up Supabase Cloud Status listener
+    setCloudStatusListener((status, text) => this.updateCloudStatusUI(status, text));
+
     // Try loading cloud / shared link state if available
     await this.seatingManager.loadFromCloud();
+
+    // 2.2 Subscribe to realtime multi-device sync
+    subscribeToCloudChanges((newTables) => {
+      this.seatingManager.updateTablesFromRealtime(newTables);
+      this.syncAll();
+      this.showToast('⚡ Distribución actualizada en vivo desde Supabase');
+    });
 
     // 3. Initialize 3D Scene
     const container = document.getElementById('canvas-container');
@@ -65,6 +80,36 @@ class App {
     window.addEventListener('orientationchange', updateHeight);
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateHeight);
+    }
+  }
+
+  updateCloudStatusUI(status, text) {
+    const pill = document.getElementById('cloud-status-pill');
+    const label = document.getElementById('cloud-label');
+    const modalDetail = document.getElementById('supabase-status-detail');
+
+    if (!pill) return;
+    pill.classList.remove('saving', 'offline', 'synced');
+
+    if (status === 'synced') {
+      pill.classList.add('synced');
+      if (label) label.textContent = 'En la Nube';
+      if (modalDetail) modalDetail.textContent = text || 'Conectado y sincronizado con Supabase';
+    } else if (status === 'saving') {
+      pill.classList.add('saving');
+      if (label) label.textContent = 'Guardando...';
+      if (modalDetail) modalDetail.textContent = text || 'Guardando cambios en Supabase...';
+    } else if (status === 'needs_table') {
+      pill.classList.add('offline');
+      if (label) label.textContent = 'Crear Tabla';
+      if (modalDetail) modalDetail.textContent = 'Falta crear la tabla "boda_mesas" en Supabase';
+    } else if (status === 'connecting') {
+      if (label) label.textContent = 'Conectando...';
+      if (modalDetail) modalDetail.textContent = text || 'Conectando a Supabase...';
+    } else {
+      pill.classList.add('offline');
+      if (label) label.textContent = 'Modo Local';
+      if (modalDetail) modalDetail.textContent = text || 'Modo local (sin sincronización)';
     }
   }
 
@@ -252,22 +297,96 @@ class App {
       });
     }
 
-    // Mobile Drawer Open / Close
+    // Mobile Drawer Open / Close with Backdrop Overlay
     const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
     const btnMobile = document.getElementById('btn-mobile-drawer');
     const btnCloseMobile = document.getElementById('btn-close-sidebar-mobile');
 
-    if (btnMobile) {
-      btnMobile.addEventListener('click', () => {
-        sidebar.classList.add('mobile-open');
-        if (btnCloseMobile) btnCloseMobile.style.display = 'block';
+    const openDrawer = () => {
+      if (sidebar) sidebar.classList.add('mobile-open');
+      if (backdrop) backdrop.classList.add('active');
+      document.body.classList.add('drawer-open');
+    };
+
+    const closeDrawer = () => {
+      if (sidebar) sidebar.classList.remove('mobile-open');
+      if (backdrop) backdrop.classList.remove('active');
+      document.body.classList.remove('drawer-open');
+    };
+
+    if (btnMobile) btnMobile.addEventListener('click', openDrawer);
+    if (btnCloseMobile) btnCloseMobile.addEventListener('click', closeDrawer);
+    if (backdrop) backdrop.addEventListener('click', closeDrawer);
+
+    // Supabase Cloud Status pill opens Supabase Modal
+    const cloudPill = document.getElementById('cloud-status-pill');
+    if (cloudPill) {
+      cloudPill.addEventListener('click', () => {
+        this.openModal('supabase-modal');
       });
     }
-    if (btnCloseMobile) {
-      btnCloseMobile.addEventListener('click', () => {
-        sidebar.classList.remove('mobile-open');
+
+    // Supabase Modal events
+    const btnCloseSupabase = document.getElementById('btn-close-supabase');
+    const btnCloseSupabaseModal = document.getElementById('btn-close-supabase-modal');
+    const btnCopySql = document.getElementById('btn-copy-sql');
+    const btnRetrySupabase = document.getElementById('btn-retry-supabase');
+
+    if (btnCloseSupabase) btnCloseSupabase.addEventListener('click', () => this.closeModal('supabase-modal'));
+    if (btnCloseSupabaseModal) btnCloseSupabaseModal.addEventListener('click', () => this.closeModal('supabase-modal'));
+    
+    if (btnCopySql) {
+      btnCopySql.addEventListener('click', () => {
+        const sqlEl = document.getElementById('supabase-sql-code');
+        if (sqlEl) {
+          navigator.clipboard.writeText(sqlEl.textContent).then(() => {
+            this.showToast('📋 ¡Código SQL copiado! Pégalo en SQL Editor de Supabase');
+          }).catch(() => {
+            this.showToast('Copia el texto del recuadro SQL');
+          });
+        }
       });
     }
+
+    if (btnRetrySupabase) {
+      btnRetrySupabase.addEventListener('click', async () => {
+        this.showToast('🔄 Verificando conexión con Supabase...');
+        try {
+          const { error } = await supabase.from('boda_mesas').select('id, updated_at').limit(1);
+          if (!error) {
+            this.showToast('✅ ¡Tabla boda_mesas conectada y lista en Supabase!');
+            this.updateCloudStatusUI('synced', 'Base de datos conectada correctamente');
+            await this.seatingManager.loadFromCloud();
+            this.syncAll();
+          } else {
+            this.showToast(`⚠️ Supabase reporta: ${error.message}`);
+            this.updateCloudStatusUI('needs_table', error.message);
+          }
+        } catch (err) {
+          this.showToast(`Error de conexión: ${err.message}`);
+        }
+      });
+    }
+
+    // Close any modal by clicking on its backdrop
+    document.querySelectorAll('.modal-overlay').forEach(modal => {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          this.closeModal(modal.id);
+        }
+      });
+    });
+
+    // Close mobile drawer on Escape key
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeDrawer();
+        document.querySelectorAll('.modal-overlay.active').forEach(m => {
+          this.closeModal(m.id);
+        });
+      }
+    });
 
     // Camera preset buttons
     document.querySelectorAll('.cam-btn').forEach(btn => {
@@ -551,8 +670,8 @@ class App {
   }
 
   /**
-   * Dedicated Quick Assign Modal with explicit, distinct table buttons
-   * Guarantees clicking "Mesa 2" ALWAYS assigns directly to Mesa 2!
+   * Dedicated Quick Assign Modal with touch-safe scrolling and distinct table buttons.
+   * Eliminates accidental clicks when scrolling on mobile!
    */
   openQuickAssignModal(guest) {
     document.getElementById('quick-assign-guest-name').textContent = guest.displayName;
@@ -569,32 +688,37 @@ class App {
       const isFull = freeSeats === 0;
 
       const card = document.createElement('div');
+      card.className = 'quick-assign-card';
       card.style.cssText = `
-        background: ${isFull ? 'rgba(30, 41, 59, 0.6)' : 'rgba(18, 22, 33, 0.9)'};
-        border: 1px solid ${isFull ? 'rgba(245, 158, 11, 0.3)' : 'var(--color-border)'};
+        background: ${isFull ? 'rgba(30, 41, 59, 0.7)' : 'rgba(18, 22, 33, 0.95)'};
+        border: 1.5px solid ${isFull ? 'rgba(245, 158, 11, 0.35)' : 'var(--color-border)'};
         border-radius: var(--radius-md);
-        padding: 12px;
+        padding: 12px 14px;
         display: flex;
         flex-direction: column;
         gap: 8px;
         cursor: pointer;
         transition: all 0.2s ease;
+        user-select: none;
       `;
 
       card.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <strong style="font-family:var(--font-serif); font-size:14px; color:${isFull ? '#fcd34d' : 'var(--color-gold-light)'};">
+          <strong style="font-family:var(--font-serif); font-size:14.5px; color:${isFull ? '#fcd34d' : 'var(--color-gold-light)'};">
             🍽️ ${escapeHtml(table.name)}
           </strong>
-          <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; background:${isFull ? 'rgba(245,158,11,0.2)' : 'rgba(16,185,129,0.2)'}; color:${isFull ? '#f59e0b' : '#34d399'};">
-            ${isFull ? `Llena (${table.capacity}/${table.capacity})` : `${freeSeats} libres`}
+          <span style="font-size:11.5px; font-weight:700; padding:3px 10px; border-radius:999px; background:${isFull ? 'rgba(245,158,11,0.2)' : 'rgba(16,185,129,0.2)'}; color:${isFull ? '#f59e0b' : '#34d399'};">
+            ${isFull ? `Llena (${table.capacity}/${table.capacity})` : `${freeSeats} puestos libres`}
           </span>
         </div>
-        <div style="font-size:11px; color:var(--color-text-dim);">
-          Capacidad: ${table.capacity} personas
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:var(--color-text-dim);">
+          <span>Capacidad total: ${table.capacity} personas</span>
+          <span style="color:${isFull ? '#f59e0b' : 'var(--color-gold-light)'}; font-weight:600;">
+            ${isFull ? (table.capacity < 15 ? '➕ Ampliar y sentar' : 'Capacidad Máxima') : 'Espacio disponible'}
+          </span>
         </div>
-        <button class="btn ${isFull ? 'btn-secondary' : 'btn-gold'}" style="width:100%; font-size:12px; padding:6px 10px; justify-content:center; margin-top:4px;">
-          ${isFull ? (table.capacity < 15 ? `➕ Ampliar a ${table.capacity + 1} y sentar aquí` : 'Mesa llena al máximo') : `Asignar a ${table.name} 👉`}
+        <button type="button" class="btn ${isFull ? 'btn-secondary' : 'btn-gold'}" style="width:100%; font-size:12.5px; padding:8px 12px; justify-content:center; margin-top:4px; pointer-events:none;">
+          ${isFull ? (table.capacity < 15 ? `➕ Ampliar a ${table.capacity + 1} y ubicar aquí` : 'Mesa llena al máximo (15)') : `Ubicar en ${table.name} 🪑`}
         </button>
       `;
 
@@ -603,32 +727,53 @@ class App {
         card.style.transform = 'translateY(-2px)';
       });
       card.addEventListener('mouseleave', () => {
-        card.style.borderColor = isFull ? 'rgba(245, 158, 11, 0.3)' : 'var(--color-border)';
+        card.style.borderColor = isFull ? 'rgba(245, 158, 11, 0.35)' : 'var(--color-border)';
         card.style.transform = 'translateY(0)';
       });
 
-      card.addEventListener('click', () => {
+      // Touch drag detection so scrolling NEVER triggers accidental assignments
+      let touchStartY = 0;
+      let isScrolling = false;
+
+      card.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches[0]) {
+          touchStartY = e.touches[0].clientY;
+          isScrolling = false;
+        }
+      }, { passive: true });
+
+      card.addEventListener('touchmove', (e) => {
+        if (e.touches && e.touches[0]) {
+          if (Math.abs(e.touches[0].clientY - touchStartY) > 8) {
+            isScrolling = true;
+          }
+        }
+      }, { passive: true });
+
+      const doAssign = () => {
+        if (isScrolling) return; // Ignore if user was dragging to scroll!
+
         if (!isFull) {
-          // Direct assignment to this specific table!
           const emptySeatIdx = table.seats.findIndex(s => !s.guestId);
           if (emptySeatIdx !== -1) {
             this.seatingManager.assignGuest(table.id, emptySeatIdx, guest.id);
             this.syncAll();
             this.closeModal('quick-assign-modal');
-            this.showToast(`✅ Invitado ${guest.displayName} asignado a ${table.name}`);
+            this.showToast(`✅ ${guest.displayName} asignado a ${table.name}`);
           }
         } else if (table.capacity < 15) {
-          // Expand capacity by 1 and seat
           this.seatingManager.adjustTableCapacity(table.id, 1);
           const newSeatIdx = table.seats.length - 1;
           this.seatingManager.assignGuest(table.id, newSeatIdx, guest.id);
           this.syncAll();
           this.closeModal('quick-assign-modal');
-          this.showToast(`✅ ${table.name} ampliada a ${table.capacity} puestos y ${guest.displayName} asignado exitosamente`);
+          this.showToast(`✅ ${table.name} ampliada a ${table.capacity} y ${guest.displayName} asignado`);
         } else {
-          alert(`Esta mesa ya alcanzó la capacidad máxima permitida de 15 personas.`);
+          alert('Esta mesa ya alcanzó la capacidad máxima permitida de 15 personas.');
         }
-      });
+      };
+
+      card.addEventListener('click', doAssign);
 
       grid.appendChild(card);
     });
