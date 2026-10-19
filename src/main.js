@@ -26,6 +26,9 @@ class App {
   }
 
   async init() {
+    // 0. Synchronize mobile viewport height accurately against browser toolbars
+    this.initMobileViewport();
+
     // 1. Load initial data
     this.loadGuestData(RAW_CSV_DATA);
 
@@ -50,6 +53,19 @@ class App {
     this.bindEvents();
 
     this.showToast('Bienvenido al Visualizador 3D de Mesas para la Boda de Fernando & Luisa 💍');
+  }
+
+  initMobileViewport() {
+    const updateHeight = () => {
+      const vh = window.innerHeight;
+      document.documentElement.style.setProperty('--app-height', `${vh}px`);
+    };
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+    window.addEventListener('orientationchange', updateHeight);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateHeight);
+    }
   }
 
   loadGuestData(csvText) {
